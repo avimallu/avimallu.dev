@@ -3,6 +3,12 @@
 # To modify the layout, see https://jekyllrb.com/docs/themes/#overriding-theme-defaults
 ---
 
-This page is under construction, but you can view things about me below.
+# What are you here for?
 
-[About Me](./about.md)
+From LinkedIn or Github? Then you probably want to know a little bit [about me](./about.md)
+
+Bookmarked this page for some of my informative posts? See a list of them below.
+
+# Interesting Problems
+
+[*Fast Overlap Joins* to find the number of trucks at a station during time intervals](./_posts/2023-06-22-overlap_joins.md).
