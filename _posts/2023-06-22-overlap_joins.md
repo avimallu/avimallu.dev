@@ -12,7 +12,7 @@ I'm more of a right-tool-for-the-job person, so I tried to find a better solutio
 
 # Problem Statement
 
-Suppose we have a dataset that captures the arriva and departure times of trucks at a station, along with the truck's ID.
+Suppose we have a dataset that captures the arrival and departure times of trucks at a station, along with the truck's ID.
 
 ```py
 import polars as pl
@@ -179,4 +179,82 @@ We clearly see the strengths of DuckDB in how succintly we were able to express 
 
 # What are the alternatives?
 
-This post is still a work-in-progress - I'll update with additional solutions once we find them!
+## The `data.table` way
+
+[`data.table`](https://github.com/Rdatatable/data.table) is a package that has historically been ahead of its time - in both speed and features that it has had. Developement has taken a hit recently, but will likely [pick back up](https://github.com/Rdatatable/data.table/issues/5656). It's my favourite package on all fronts for data manipulation, but suffers simply from the lack of broader R support across the ML and DL space.
+
+### The `foverlaps` function
+
+If this kind of overlapping join is common, shouldn't someone have developed a package for it. Turns out, `data.table` has, and with very specific constraints that make it the perfect solution to our problem (if you don't mind switching over to R, that is).
+
+The `foverlaps` function has these requirements:
+
+1. The input `data.table` objects have to be keyed for automatic recognition of columns.
+2. The default match type is that it matches all three cases from the image above. Side note: it also has matches for `within` overlap, matching `start` and `end` windows, 
+3. The last two matching columns in the join condition in `by` must specify the `start` and `end` points of the overlapping window. This isn't a problem for us now, but does restrict for future uses where we may want non-equi joins on other cases.
+
+### The code, _si_, the code!
+
+Without further ado:
+
+```r
+library(data.table)
+library(lubridate)
+
+arrival_time = as_datetime(c(
+  '2023-01-01 06:23:47.000000', '2023-01-01 06:26:42.000000',
+  '2023-01-01 06:30:20.000000', '2023-01-01 06:32:06.000000',
+  '2023-01-01 06:33:09.000000', '2023-01-01 06:34:08.000000',
+  '2023-01-01 06:36:40.000000', '2023-01-01 06:37:43.000000',
+  '2023-01-01 06:39:48.000000'))
+departure_time = as_datetime(c(
+  '2023-01-01 06:25:08.000000', '2023-01-01 06:28:02.000000',
+  '2023-01-01 06:35:01.000000', '2023-01-01 06:33:48.000000',
+  '2023-01-01 06:36:01.000000', '2023-01-01 06:39:49.000000',
+  '2023-01-01 06:38:34.000000', '2023-01-01 06:40:48.000000',
+  '2023-01-01 06:46:10.000000'))
+ID = c('A1', 'A1', 'A5', 'A6', 'B3', 'C3', 'A6', 'A5', 'A6')
+
+DT = data.table(
+  arrival_time = arrival_time,
+  departure_time = departure_time,
+  ID = ID)
+
+DT_with_windows = copy(DT)[, `:=`(
+  window_start   = arrival_time   - minutes(1),
+  window_end = departure_time + minutes(1))]
+
+# This step is necessary for the second table, but not the first, but we
+# key both data.tables to make the foverlap code very succinct.
+setkeyv(DT, c("arrival_time", "departure_time"))
+setkeyv(DT_with_windows, c("window_start", "window_end"))
+
+# The foverlap function returns a data.table, so we can simply apply
+# the usual data.table syntax on it!
+foverlaps(DT, DT_with_windows)[
+  , .(docked_trucks = list(unique(i.ID)),
+      docked_truck_count = uniqueN(i.ID))
+  , .(arrival_time, departure_time)]
+```
+
+provides us the output:
+
+```r
+          arrival_time      departure_time docked_trucks docked_truck_count
+                <POSc>              <POSc>        <list>              <int>
+1: 2023-01-01 06:23:47 2023-01-01 06:25:08            A1                  1
+2: 2023-01-01 06:26:42 2023-01-01 06:28:02            A1                  1
+3: 2023-01-01 06:30:20 2023-01-01 06:35:01   A5,A6,B3,C3                  4
+4: 2023-01-01 06:32:06 2023-01-01 06:33:48   A5,A6,B3,C3                  4
+5: 2023-01-01 06:33:09 2023-01-01 06:36:01   A5,A6,B3,C3                  4
+6: 2023-01-01 06:34:08 2023-01-01 06:39:49   A5,A6,B3,C3                  4
+7: 2023-01-01 06:36:40 2023-01-01 06:38:34   B3,C3,A6,A5                  4
+8: 2023-01-01 06:37:43 2023-01-01 06:40:48      C3,A6,A5                  3
+9: 2023-01-01 06:39:48 2023-01-01 06:46:10      C3,A5,A6                  3
+```
+
+### Considerations for using `data.table`
+
+The package offers a wonderful, nearly one-stop solution that doesn't require you to write the logic out for the query or command yourself, but has a major problem for a lot of users - it requires you to switch your codebase to R, and a lot of your tasks may be on Python or in an SQL pipeline. So, what do you do?
+
+Consider the effort in maintaining an additional dependency for your analytics pipeline (i.e. R), and the effort that you'll need to invest to run R from Python, or run an R script in your pipeline and pull the output from it back into the pipeline, and make your call.
