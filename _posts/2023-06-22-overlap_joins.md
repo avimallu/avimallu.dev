@@ -1,6 +1,7 @@
 ---
-title: Fast Overlap Joins
+title: Fast overlap joins in SQL, Python and R
 permalink: /docked_trucks_in_interval
+author: Avinash Mallya
 tags: [python, polars, duckdb, R, data.table, foverlaps, overlap, join]
 ---
 
@@ -15,7 +16,8 @@ I'm more of a right-tool-for-the-job person, so I tried to find a better solutio
 Suppose we have a dataset that captures the arrival and departure times of trucks at a station, along with the truck's ID.
 
 ```py
-import polars as pl
+import polars as pl # if you don't have polars, run 
+                    # pip install 'polars[all]'
 data = pl.from_repr("""
 ┌─────────────────────┬─────────────────────┬─────┐
 │ arrival_time        ┆ departure_time      ┆ ID  │
@@ -41,7 +43,7 @@ We want to identify the number of trucks docked at any given time within a thres
 
 ## Evaluate for a specific row
 
-Before we find a general solution to this problem, let's consider a specific row:
+Before we find a general solution to this problem, let's consider a specific row to understand the problem better:
 
 ```py
 """
@@ -55,11 +57,11 @@ Before we find a general solution to this problem, let's consider a specific row
 """
 ```
 
-This would mean that we need to find the number of trucks that are there between `2023-01-01 06:31:06` (1 minute prior to the `arrival_time` and `2023-01-01 06:34:48` (1 minute post the `departure_time`). Manually going through, we see that `B3`, `C3`, `A6` and `A5` are the truck IDs that qualify.
+For this row, we need to find the number of trucks that are there between `2023-01-01 06:31:06` (1 minute prior to the `arrival_time` and `2023-01-01 06:34:48` (1 minute post the `departure_time`). Manually going through the original dataset, we see that `B3`, `C3`, `A6` and `A5` are the truck IDs that qualify - they all are at the station in a duration that is between `2023-01-01 06:31:06` and `2023-01-01 06:34:48`.
 
-## Algorithmically deriving the solution
+## Visually deriving an algorithm
 
-Let's visualize the different situations that we need to consider for the specific row that was discussed above. There are five cases:
+There are many cases that will qualify a truck to be present in the overlap window defined by a particular row. Specifically for the example above, we have (this visualization is generalizable, because for each row we can calculate without much difficulty the overlap *window* relative to the arrival and departure times):
 
 ![The five different ways a period can overlap.](./assets/001_overlap_joins/overlap_algorithm.png)
 
@@ -67,22 +69,24 @@ Take some time to absorb these cases - it's important for the part where we writ
 
 ## Writing an SQL query based on the algorithm
 
-In theory, we can use any language that has the capability to define rules that meet our algorithmic requirements outlined in the above section to find the solution. However, very few tools have come close to the efficiency and elegance that SQL has in being able to specify the algorithm in an easy to understand manner.
+In theory, we can use any language that has the capability to define rules that meet our algorithmic requirements outlined in the above section to find the solution. Why choose SQL? It's often able to convey elegantly the logic that was used to execute the algorithm; and while it does come with excessive verbosity at times, it doesn't quite in this case.
+
+Note here that we run SQL in Python with almost no setup or boilerplate code - so this is a Python based solution as well (although not quite Pythonic!).
 
 ### Introducing the DuckDB package
 
-Again, in theory, any SQL package or language can be used. Far too few however meet the ease-of-use that [DuckDB](https://duckdb.org/) provides:
+Once again, in theory, any SQL package or language can be used. Far too few however meet the ease-of-use that [DuckDB](https://duckdb.org/) provides:
 
 1. no expensive set-up time (meaning no need for setting up databases, even temporary ones),
 2. no dependencies (other than DuckDB itself, just `pip install duckdb`),
 3. some very [friendly SQL extensions](https://duckdb.org/2022/05/04/friendlier-sql.html), and
 4. ability to work directly on Polars and Pandas DataFrames without conversions
 
-all with [mind-blowing speed](https://duckdblabs.github.io/db-benchmark/) that stands shoulder-to-shoulder with Polars. We'll also use a few advanced SQL concepts, like below:
+all with [mind-blowing speed](https://duckdblabs.github.io/db-benchmark/) that stands shoulder-to-shoulder with Polars. We'll also use a few advanced SQL concepts noted below.
 
 #### Self-joins
 
-You remember this - a join of a table with itself is a self join. Very few cases where such an operation would make sense, and this happens to be one of them!
+This should be a familiar, albeit not often used concept - a join of a table with itself is a self join. There are few cases where such an operation would make sense, and this happens to be one of them.
 
 #### A bullet train recap of non-equi joins
 
@@ -98,9 +102,41 @@ Dates can be rather difficult to handle well in most tools and languages, with s
 
 ### Tell me the query, PLEASE!
 
-Okay - had a lot of background. Let's have at it!
+Okay - had a lot of background. Let's have at it! The query by itself in SQL is (see immediately below for runnable code in Python):
+
+```sql
+SELECT
+     A.arrival_time
+    ,A.departure_time
+    ,A.window_open
+    ,A.window_close
+    ,LIST_DISTINCT(LIST(B.ID)) AS docked_trucks
+    ,LIST_UNIQUE(LIST(B.ID))   AS docked_truck_count
+
+FROM (
+    SELECT *
+        ,arrival_time   - (INTERVAL 1 MINUTE) AS window_open
+        ,departure_time + (INTERVAL 1 MINUTE) AS window_close
+    FROM data) A
+
+LEFT JOIN (
+    SELECT *
+        ,DATEDIFF('seconds', arrival_time, departure_time) AS duration
+    FROM data) B
+
+ON ((B.arrival_time <= A.window_open AND 
+    	(B.arrival_time   + TO_SECONDS(B.duration)) >=  A.window_open) OR
+    (B.arrival_time >= A.window_open AND 
+                                  B.departure_time  <= A.window_close) OR
+    (B.arrival_time >= A.window_open AND
+    	(B.departure_time - TO_SECONDS(B.duration)) <= A.window_close))
+GROUP BY 1, 2, 3, 4
+```
+
+A small, succinct query such as this will need a bit of explanation to take it all in. Here's one below, reproducible in Python (make sure to install `duckdb` first!):
 
 ```py
+import duckdb as db
 db.query("""
     SELECT
         A.arrival_time
@@ -131,11 +167,11 @@ db.query("""
     ) B
 
     ON (
-    	-- Case 2 in the diagram;
+        -- Case 2 in the diagram;
         (B.arrival_time <= A.window_open AND 
-        	-- Adding the duration here makes sure that the second interval
-        	-- is at least ENDING AFTER the start of the overlap window
-        	(B.arrival_time   + TO_SECONDS(B.duration)) >=  A.window_open) OR
+            -- Adding the duration here makes sure that the second interval
+            -- is at least ENDING AFTER the start of the overlap window
+            (B.arrival_time   + TO_SECONDS(B.duration)) >=  A.window_open) OR
 
         -- Case 3 in the diagram - the simplest of all five cases
         (B.arrival_time >= A.window_open AND 
@@ -143,13 +179,12 @@ db.query("""
 
         -- Case 4 in the digram;
         (B.arrival_time >= A.window_open AND
-        	-- Subtracting the duration here makes sure that the second interval
-        	-- STARTS BEFORE the end of the overlap window.
-        	(B.departure_time - TO_SECONDS(B.duration)) <= A.window_close)
+            -- Subtracting the duration here makes sure that the second interval
+            -- STARTS BEFORE the end of the overlap window.
+            (B.departure_time - TO_SECONDS(B.duration)) <= A.window_close)
     )
     GROUP BY 1, 2, 3, 4
 """)
-
 ```
 
 The output of this query is:
@@ -175,7 +210,7 @@ The output of this query is:
 """
 ```
 
-We clearly see the strengths of DuckDB in how succintly we were able to express this operation. However, we also find how DuckDB is able to seamlessly integrate with an existing Pandas or Polars pipeline with zero-conversion costs. In fact, we can convert this back to a Polars or Pandas dataframe by appending the ending bracket with `db.query(...).pl()` and `db.query(...).pd()` respectively. 
+We clearly see the strengths of DuckDB in how succintly we were able to express this operation. We also find how DuckDB is able to seamlessly integrate with an existing Pandas or Polars pipeline with zero-conversion costs. In fact, we can convert this back to a Polars or Pandas dataframe by appending the ending bracket with `db.query(...).pl()` and `db.query(...).pd()` respectively. 
 
 # What are the alternatives?
 
@@ -185,7 +220,7 @@ We clearly see the strengths of DuckDB in how succintly we were able to express 
 
 ### The `foverlaps` function
 
-If this kind of overlapping join is common, shouldn't someone have developed a package for it. Turns out, `data.table` has, and with very specific constraints that make it the perfect solution to our problem (if you don't mind switching over to R, that is).
+If this kind of overlapping join is common, shouldn't someone have developed a package for it? Turns out, `data.table` has, and with very specific constraints that make it the perfect solution to our problem (if you don't mind switching over to R, that is).
 
 The `foverlaps` function has these requirements:
 
@@ -201,6 +236,7 @@ Without further ado:
 library(data.table)
 library(lubridate)
 
+######### BOILERPLATE CODE, NO LOGIC HERE ####################
 arrival_time = as_datetime(c(
   '2023-01-01 06:23:47.000000', '2023-01-01 06:26:42.000000',
   '2023-01-01 06:30:20.000000', '2023-01-01 06:32:06.000000',
@@ -219,7 +255,12 @@ DT = data.table(
   arrival_time = arrival_time,
   departure_time = departure_time,
   ID = ID)
+######### BOILERPLATE CODE, NO LOGIC HERE ####################
 
+# A copy(DT) creates a copy of a data.table that isn't linked
+# to the original one, so that changes in it don't reflect in
+# the original DT object.
+# The `:=` allow assignment by reference (i.e. "in place").
 DT_with_windows = copy(DT)[, `:=`(
   window_start   = arrival_time   - minutes(1),
   window_end = departure_time + minutes(1))]
@@ -231,6 +272,8 @@ setkeyv(DT_with_windows, c("window_start", "window_end"))
 
 # The foverlap function returns a data.table, so we can simply apply
 # the usual data.table syntax on it!
+# Since we have the same name of some columns in both data.tables,
+# the latter table's columns are prefixed with "i." to avoid conflicts.
 foverlaps(DT, DT_with_windows)[
   , .(docked_trucks = list(unique(i.ID)),
       docked_truck_count = uniqueN(i.ID))
