@@ -133,7 +133,9 @@ ON ((B.arrival_time <= A.window_open AND
 GROUP BY 1, 2, 3, 4
 ```
 
-A small, succinct query such as this will need a bit of explanation to take it all in. Here's one below, reproducible in Python (make sure to install `duckdb` first!):
+A small, succinct query such as this will need a bit of explanation to take it all in. Here's one below, reproducible in Python (make sure to install `duckdb` first!). Expand it to view.
+
+<details markdown="1"><summary>SQL with explanation.</summary>
 
 ```py
 import duckdb as db
@@ -187,6 +189,8 @@ db.query("""
 """)
 ```
 
+</details>
+
 The output of this query is:
 
 ```
@@ -211,6 +215,194 @@ The output of this query is:
 ```
 
 We clearly see the strengths of DuckDB in how succintly we were able to express this operation. We also find how DuckDB is able to seamlessly integrate with an existing Pandas or Polars pipeline with zero-conversion costs. In fact, we can convert this back to a Polars or Pandas dataframe by appending the ending bracket with `db.query(...).pl()` and `db.query(...).pd()` respectively. 
+
+## Can we make the SQL simpler?
+
+Now that we've understood the logic that goes into the query, let's try to optimize the algorithm. We have the three conditions:
+
+```sql
+-- Case 2 in the diagram
+(B.arrival_time <= A.window_open AND 
+    (B.arrival_time   + TO_SECONDS(B.duration)) >=  A.window_open) OR
+-- Case 3 in the diagram
+(B.arrival_time >= A.window_open AND 
+                              B.departure_time  <= A.window_close) OR
+-- Case 4 in the diagram
+(B.arrival_time >= A.window_open AND
+    (B.departure_time - TO_SECONDS(B.duration)) <= A.window_close)
+```
+
+What is common between these three conditions? It takes a while to see it; but it becomes clear that all these cases require the start of the overlap to be *before* the window ends, and the end of the overlap to be *after* the window starts. This can be simplified to just:
+
+```sql
+B.arrival_time   <= A.window_close AND
+B.departure_time >= A.window_open
+```
+
+making our query much simpler!
+
+### Simplified SQL: Part 1
+
+We've removed the need for the `duration` calculation algother now. Therefore, we can write:
+
+```sql
+SELECT
+     A.arrival_time
+    ,A.departure_time
+    ,A.window_open
+    ,A.window_close
+    ,LIST_DISTINCT(LIST(B.ID)) AS docked_trucks
+    ,LIST_UNIQUE(LIST(B.ID))   AS docked_truck_count
+
+FROM (
+    SELECT *
+        ,arrival_time   - (INTERVAL 1 MINUTE) AS window_open
+        ,departure_time + (INTERVAL 1 MINUTE) AS window_close
+    FROM data) A
+
+LEFT JOIN data B
+
+ON (
+    B.arrival_time   <= A.window_close AND
+    B.departure_time >= A.window_open
+)
+GROUP BY 1, 2, 3, 4
+```
+
+Can we simplify this even further?
+
+### Simplification: Part 2
+
+I think the SQL query in the above section is very easy to ready already. However, it is a little clunky overall, and there is a way that we can leverage DuckDB's extensive optimizations to simplify our **legibility** by rewriting the query as a cross join:
+
+```sql
+SELECT
+    A.arrival_time
+    ,A.departure_time
+    ,A.arrival_time - (INTERVAL 1 MINUTE)   AS window_open
+    ,A.departure_time + (INTERVAL 1 MINUTE) AS window_close
+    ,LIST_DISTINCT(LIST(B.ID)) AS docked_trucks
+    ,LIST_UNIQUE(LIST(B.ID))   AS docked_truck_count
+FROM  data A, data B
+WHERE B.arrival_time   <= window_close
+AND   B.departure_time >= window_open
+GROUP BY 1, 2, 3, 4
+``` 
+
+Why does this work? Before optimization on DuckDB, this is what the query plan looks like:
+
+<details markdown="1"><summary>DuckDB query plan before optimization</summary>
+
+```py
+"""
+┌───────────────────────────┐                             
+│         PROJECTION        │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│             0             │                             
+│             1             │                             
+│             2             │                             
+│             3             │                             
+│       docked_trucks       │                             
+│     docked_truck_count    │                             
+└─────────────┬─────────────┘                                                          
+┌─────────────┴─────────────┐                             
+│         AGGREGATE         │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│        arrival_time       │                             
+│       departure_time      │                             
+│        window_open        │                             
+│        window_close       │                             
+│          list(ID)         │                             
+└─────────────┬─────────────┘                                                          
+┌─────────────┴─────────────┐                             
+│           FILTER          │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│     (arrival_time <=      │                             
+│(departure_time + to_m...  │                             
+│        AS BIGINT))))      │                             
+│    (departure_time >=     │                             
+│(arrival_time - to_min...  │                             
+│        AS BIGINT))))      │                             
+└─────────────┬─────────────┘                                                          
+┌─────────────┴─────────────┐                             
+│       CROSS_PRODUCT       ├──────────────┐              
+└─────────────┬─────────────┘              │                                           
+┌─────────────┴─────────────┐┌─────────────┴─────────────┐
+│         ARROW_SCAN        ││         ARROW_SCAN        │
+└───────────────────────────┘└───────────────────────────┘ 
+"""                            
+```
+
+</details>
+
+After optimization, the `CROSS_PRODUCT` is **automatically** optimized to an **interval join**!
+
+<details markdown="1"><summary>DuckDB query after before optimization</summary>
+
+```py
+"""
+┌───────────────────────────┐                             
+│         PROJECTION        │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│             0             │                             
+│             1             │                             
+│             2             │                             
+│             3             │                             
+│       docked_trucks       │                             
+│     docked_truck_count    │                             
+└─────────────┬─────────────┘                                                          
+┌─────────────┴─────────────┐                             
+│         AGGREGATE         │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│        arrival_time       │                             
+│       departure_time      │                             
+│        window_open        │                             
+│        window_close       │                             
+│          list(ID)         │                             
+└─────────────┬─────────────┘                                                          
+┌─────────────┴─────────────┐                             
+│      COMPARISON_JOIN      │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│           INNER           │                             
+│ ((departure_time + '00:01 │                             
+│     :00'::INTERVAL) >=    ├──────────────┐              
+│        arrival_time)      │              │              
+│((arrival_time - '00:01:00'│              │              
+│       ::INTERVAL) <=      │              │              
+│       departure_time)     │              │              
+└─────────────┬─────────────┘              │                                           
+┌─────────────┴─────────────┐┌─────────────┴─────────────┐
+│         ARROW_SCAN        ││         ARROW_SCAN        │
+└───────────────────────────┘└───────────────────────────┘
+"""                      
+```
+
+</details>
+
+So in effect, we're actually exploiting a feature of DuckDB to allow us to write our queries in a suboptimal manner for greater readability, and allowing the optmizer to do a good chunk of our work for us. I wouldn't recommend using this generally, because not all SQL engine optmizers will be able to find an efficient route to these calculations for large datasets.
+
+### How to get query plans?
+
+I'm glad you asked. Here's the DuckDB [page explaining `EXPLAIN`](https://duckdb.org/docs/guides/meta/explain.html) (heh). Here's the code I used:
+
+```py
+import duckdb as db
+db.sql("SET EXPLAIN_OUTPUT='all';")
+print(db.query("""
+EXPLAIN
+SELECT
+    A.arrival_time
+    ,A.departure_time
+    ,A.arrival_time - (INTERVAL 1 MINUTE) AS window_open
+    ,A.departure_time + (INTERVAL 1 MINUTE) AS window_close
+    ,LIST_DISTINCT(LIST(B.ID)) AS docked_trucks
+    ,LIST_UNIQUE(LIST(B.ID))   AS docked_truck_count
+FROM  data A, data B
+WHERE B.arrival_time   <= window_close
+AND   B.departure_time >= window_open
+GROUP BY 1, 2, 3, 4
+""").pl()[1, 1])
+```
 
 # What are the alternatives?
 
