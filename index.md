@@ -3,9 +3,9 @@
 # To modify the layout, see https://jekyllrb.com/docs/themes/#overriding-theme-defaults
 ---
 
-# What are you here for?
+# Hey there!
 
-From LinkedIn or Github? Then you probably want to know a little bit [about me](./about.md)
+From LinkedIn or Github? Then you probably want to know a little bit [about me](./about.md).
 
 Bookmarked this page for some of my informative posts? See a list of them below.
 
