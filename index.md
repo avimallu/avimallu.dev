@@ -12,3 +12,5 @@ Bookmarked this page for some of my informative posts? See a list of them below.
 # Interesting Problems
 
 [*Fast Overlap Joins* to find the number of trucks at a station during time intervals](./_posts/2023-06-22-overlap_joins.md).
+
+[Quick PowerPoint hacks to make client-ready presentations](./_posts/2023-10-20-PowerPointSnap.md).
