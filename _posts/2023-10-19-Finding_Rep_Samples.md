@@ -232,7 +232,7 @@ def get_edge_list(label, k=5):
 
 The next step in the process is to create a network graph using the edge-list. But why?
 
-Remember that we have identified the 5 nearest neighbors of **each** data point. Let's say that we have a point A that has a nearest neighbor B. C is **not** a nearest neighbor of A, but it is a nearest neighbor of B. In a network graph, if A and C are sufficiently similar enough to B within a particular *minimum thershold*, then A will be connected to C through C! Hopefully a small visual below would help.
+Remember that we have identified the (k=5) nearest neighbors of **each** data point. Let's say that we have a point A that has a nearest neighbor B. C is **not** a nearest neighbor of A, but it is a nearest neighbor of B. In a network graph, if A and C are sufficiently similar enough to B within a particular *minimum thershold*, then A will be connected to C through B! Hopefully a small visual below would help.
 
 ![How a network component is formed.](./assets/003_representative_samples/001_Network_Cluster_1.png)
 
