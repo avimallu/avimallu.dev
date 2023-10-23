@@ -164,11 +164,11 @@ def create_index(title_embeddings):
     return ann_index # Faiss considers databases an "index"
 ```
 
-This does create *a* database. But remember, we're trying to find *representative samples* - which means we need to do this *by* the category (or label). So let's design a function that sends `data` as that for a particular category, and the create the database. We'll need three pieces of information from this function:
+This does create *a* database. But remember, we're trying to find *representative samples* - which means we need to do this *by* the category (or label). So let's design a function that sends only the necessary data as that for a particular category, and the create the database. We'll need three pieces of information from this function:
 
 1. The actual `faiss` database.
-2. The actual `data` that was used to build this index.
-3. The `label_indices` from the original data that went into the `faiss` index.
+2. The actual subset of data that was used to build this index.
+3. The label indices with respect to the original data that went into the `faiss` database.
 
 (2) and (3) will help us later in rebuilding a "network graph" that will allow us to reference the original data points.
 
