@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+  <meta http-equiv="X-Clacks-Overhead" content="GNU Terry Pratchett" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Overlap Joins: Number of docker trucks in an interval | Avinash&#39;s Blog</title>
+<meta name="title" content="Overlap Joins: Number of docker trucks in an interval" />
+<meta name="description" content="Premise
+I stumbled upon an interesting Stackoverflow question that was linked via an issue on Polars github repo. The OP asked for a pure Polars solution. At the time of answering the question Polars did not have support for non-equi joins, and any solution using it would be pretty cumbersome.
+I&rsquo;m more of a right-tool-for-the-job person, so I tried to find a better solution.
+Problem Statement
+Suppose we have a dataset that captures the arrival and departure times of trucks at a station, along with the truck&rsquo;s ID." />
+<meta name="author" content="" />
+<meta name="keywords" content="" />
+
+
+
+
+
+
+  
+  <meta property="og:url" content="http://localhost:1313/blog/001_overlap_joins/001_overlap_joins/">
+  <meta property="og:site_name" content="Avinash&#39;s Blog">
+  <meta property="og:title" content="Overlap Joins: Number of docker trucks in an interval">
+  <meta property="og:description" content="Premise I stumbled upon an interesting Stackoverflow question that was linked via an issue on Polars github repo. The OP asked for a pure Polars solution. At the time of answering the question Polars did not have support for non-equi joins, and any solution using it would be pretty cumbersome.
+I’m more of a right-tool-for-the-job person, so I tried to find a better solution.
+Problem Statement Suppose we have a dataset that captures the arrival and departure times of trucks at a station, along with the truck’s ID.">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="blog">
+    <meta property="article:published_time" content="2023-06-22T00:00:00+00:00">
+    <meta property="article:modified_time" content="2023-06-22T00:00:00+00:00">
+    <meta property="og:image" content="http://localhost:1313/static/favicon.ico">
+        <meta property="fb:admins" content="0000000000">
+
+
+  
+  
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="http://localhost:1313/static/favicon.ico">
+  <meta name="twitter:title" content="Overlap Joins: Number of docker trucks in an interval">
+  <meta name="twitter:description" content="Premise I stumbled upon an interesting Stackoverflow question that was linked via an issue on Polars github repo. The OP asked for a pure Polars solution. At the time of answering the question Polars did not have support for non-equi joins, and any solution using it would be pretty cumbersome.
+I’m more of a right-tool-for-the-job person, so I tried to find a better solution.
+Problem Statement Suppose we have a dataset that captures the arrival and departure times of trucks at a station, along with the truck’s ID.">
+      <meta name="twitter:site" content="@example">
+
+
+  
+  
+  <meta itemprop="name" content="Overlap Joins: Number of docker trucks in an interval">
+  <meta itemprop="description" content="Premise I stumbled upon an interesting Stackoverflow question that was linked via an issue on Polars github repo. The OP asked for a pure Polars solution. At the time of answering the question Polars did not have support for non-equi joins, and any solution using it would be pretty cumbersome.
+I’m more of a right-tool-for-the-job person, so I tried to find a better solution.
+Problem Statement Suppose we have a dataset that captures the arrival and departure times of trucks at a station, along with the truck’s ID.">
+  <meta itemprop="datePublished" content="2023-06-22T00:00:00+00:00">
+  <meta itemprop="dateModified" content="2023-06-22T00:00:00+00:00">
+  <meta itemprop="wordCount" content="3078">
+  <meta itemprop="image" content="http://localhost:1313/static/favicon.ico">
+
+<meta name="referrer" content="no-referrer-when-downgrade" />
+
+  
+  <link href="/original.min.css" rel="stylesheet">
+
+  
+    
+    <link href="/syntax.min.css" rel="stylesheet">
+  
+
+  
+
+  
+</head>
+
+<body>
+  <header><a class="skip-link" href="#main-content">Skip to main content</a>
+
+<a href="/" class="title"><h1>Avinash&#39;s Blog</h1></a>
+<nav>
+  <a href="/">Home</a>
+
+  <a href="/blog/">Blog</a>
+
+<a href='http://localhost:1313/index.xml'>RSS</a>
+
+
+
+
+
+
+
+</nav>
+</header>
+  <main id="main-content">
+
+<h1>Overlap Joins: Number of docker trucks in an interval</h1>
+<p class="byline">
+  <time datetime='2023-06-22' pubdate>
+    2023-06-22
+  </time>
+  
+</p>
+
+<content>
+  <h1 id="premise">Premise</h1>
+<p>I stumbled upon an interesting <a href="https://stackoverflow.com/questions/76488314/polars-count-unique-values-over-a-time-period">Stackoverflow question</a> that was linked <a href="https://github.com/pola-rs/polars/issues/9467">via an issue</a> on Polars github repo. The OP asked for a pure Polars solution. At the time of answering the question Polars did not have support for non-equi joins, and any solution using it would be pretty cumbersome.</p>
+<p>I&rsquo;m more of a right-tool-for-the-job person, so I tried to find a better solution.</p>
+<h1 id="problem-statement">Problem Statement</h1>
+<p>Suppose we have a dataset that captures the arrival and departure times of trucks at a station, along with the truck&rsquo;s ID.</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span> <span class="c1"># if you don&#39;t have polars, run </span>
+</span></span><span class="line"><span class="ln"> 2</span><span class="cl">                    <span class="c1"># pip install &#39;polars[all]&#39;</span>
+</span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="n">data</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">from_repr</span><span class="p">(</span><span class="s2">&#34;&#34;&#34;
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="s2">┌─────────────────────┬─────────────────────┬─────┐
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="s2">│ arrival_time        ┆ departure_time      ┆ ID  │
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="s2">│ ---                 ┆ ---                 ┆ --- │
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="s2">│ datetime[μs]        ┆ datetime[μs]        ┆ str │
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="s2">╞═════════════════════╪═════════════════════╪═════╡
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="s2">│ 2023-01-01 06:23:47 ┆ 2023-01-01 06:25:08 ┆ A1  │
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="s2">│ 2023-01-01 06:26:42 ┆ 2023-01-01 06:28:02 ┆ A1  │
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="s2">│ 2023-01-01 06:30:20 ┆ 2023-01-01 06:35:01 ┆ A5  │
+</span></span></span><span class="line"><span class="ln">12</span><span class="cl"><span class="s2">│ 2023-01-01 06:32:06 ┆ 2023-01-01 06:33:48 ┆ A6  │
+</span></span></span><span class="line"><span class="ln">13</span><span class="cl"><span class="s2">│ 2023-01-01 06:33:09 ┆ 2023-01-01 06:36:01 ┆ B3  │
+</span></span></span><span class="line"><span class="ln">14</span><span class="cl"><span class="s2">│ 2023-01-01 06:34:08 ┆ 2023-01-01 06:39:49 ┆ C3  │
+</span></span></span><span class="line"><span class="ln">15</span><span class="cl"><span class="s2">│ 2023-01-01 06:36:40 ┆ 2023-01-01 06:38:34 ┆ A6  │
+</span></span></span><span class="line"><span class="ln">16</span><span class="cl"><span class="s2">│ 2023-01-01 06:37:43 ┆ 2023-01-01 06:40:48 ┆ A5  │
+</span></span></span><span class="line"><span class="ln">17</span><span class="cl"><span class="s2">│ 2023-01-01 06:39:48 ┆ 2023-01-01 06:46:10 ┆ A6  │
+</span></span></span><span class="line"><span class="ln">18</span><span class="cl"><span class="s2">└─────────────────────┴─────────────────────┴─────┘
+</span></span></span><span class="line"><span class="ln">19</span><span class="cl"><span class="s2">&#34;&#34;&#34;</span><span class="p">)</span></span></span></code></pre></div><p>We want to identify the number of trucks docked at any given time within a threshold of 1 minute <em>prior</em> to the arrival time of a truck, and 1 minute <em>after</em> the departure of a truck. Equivalently, this means that we need to calculate the number of trucks within a specific window for each row of the data.</p>
+<h1 id="finding-a-solution-to-the-problem">Finding a solution to the problem</h1>
+<h2 id="evaluate-for-a-specific-row">Evaluate for a specific row</h2>
+<p>Before we find a general solution to this problem, let&rsquo;s consider a specific row to understand the problem better:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="ln">1</span><span class="cl"><span class="s2">&#34;&#34;&#34;
+</span></span></span><span class="line"><span class="ln">2</span><span class="cl"><span class="s2">┌─────────────────────┬─────────────────────┬─────┐
+</span></span></span><span class="line"><span class="ln">3</span><span class="cl"><span class="s2">│ arrival_time        ┆ departure_time      ┆ ID  │
+</span></span></span><span class="line"><span class="ln">4</span><span class="cl"><span class="s2">│ ---                 ┆ ---                 ┆ --- │
+</span></span></span><span class="line"><span class="ln">5</span><span class="cl"><span class="s2">│ datetime[μs]        ┆ datetime[μs]        ┆ str │
+</span></span></span><span class="line"><span class="ln">6</span><span class="cl"><span class="s2">╞═════════════════════╪═════════════════════╪═════╡
+</span></span></span><span class="line"><span class="ln">7</span><span class="cl"><span class="s2">│ 2023-01-01 06:32:06 ┆ 2023-01-01 06:33:48 ┆ A6  │
+</span></span></span><span class="line"><span class="ln">8</span><span class="cl"><span class="s2">└─────────────────────┴─────────────────────┴─────┘
+</span></span></span><span class="line"><span class="ln">9</span><span class="cl"><span class="s2">&#34;&#34;&#34;</span></span></span></code></pre></div><p>For this row, we need to find the number of trucks that are there between <code>2023-01-01 06:31:06</code> (1 minute prior to the <code>arrival_time</code> and <code>2023-01-01 06:34:48</code> (1 minute post the <code>departure_time</code>). Manually going through the original dataset, we see that <code>B3</code>, <code>C3</code>, <code>A6</code> and <code>A5</code> are the truck IDs that qualify - they all are at the station in a duration that is between <code>2023-01-01 06:31:06</code> and <code>2023-01-01 06:34:48</code>.</p>
+<h2 id="visually-deriving-an-algorithm">Visually deriving an algorithm</h2>
+<p>There are many cases that will qualify a truck to be present in the overlap window defined by a particular row. Specifically for the example above, we have (this visualization is generalizable, because for each row we can calculate without much difficulty the overlap <em>window</em> relative to the arrival and departure times):</p>
+<p><img src="overlap_algorithm.png" alt="The five different ways a period can overlap."></p>
+<p>Take some time to absorb these cases - it&rsquo;s important for the part where we write the code for the solution. Note that we need to actually tell our algorithm to filter only for Cases 2, 3 and 4, since Cases 1 and 5 will not satisfy our requirements.</p>
+<h2 id="writing-an-sql-query-based-on-the-algorithm">Writing an SQL query based on the algorithm</h2>
+<p>In theory, we can use any language that has the capability to define rules that meet our algorithmic requirements outlined in the above section to find the solution. Why choose SQL? It&rsquo;s often able to convey elegantly the logic that was used to execute the algorithm; and while it does come with excessive verbosity at times, it doesn&rsquo;t quite in this case.</p>
+<p>Note here that we run SQL in Python with almost no setup or boilerplate code - so this is a Python based solution as well (although not quite Pythonic!).</p>
+<h3 id="introducing-the-duckdb-package">Introducing the DuckDB package</h3>
+<p>Once again, in theory, any SQL package or language can be used. Far too few however meet the ease-of-use that <a href="https://duckdb.org/">DuckDB</a> provides:</p>
+<ol>
+<li>no expensive set-up time (meaning no need for setting up databases, even temporary ones),</li>
+<li>no dependencies (other than DuckDB itself, just <code>pip install duckdb</code>),</li>
+<li>some very <a href="https://duckdb.org/2022/05/04/friendlier-sql.html">friendly SQL extensions</a>, and</li>
+<li>ability to work directly on Polars and Pandas DataFrames without conversions</li>
+</ol>
+<p>all with <a href="https://duckdblabs.github.io/db-benchmark/">mind-blowing speed</a> that stands shoulder-to-shoulder with Polars. We&rsquo;ll also use a few advanced SQL concepts noted below.</p>
+<h4 id="self-joins">Self-joins</h4>
+<p>This should be a familiar, albeit not often used concept - a join of a table with itself is a self join. There are few cases where such an operation would make sense, and this happens to be one of them.</p>
+<h4 id="a-bullet-train-recap-of-non-equi-joins">A bullet train recap of non-equi joins</h4>
+<p>A key concept that we&rsquo;ll use is the idea of joining on a <em>range</em> of values rather than a specific value. That is, instead of the usual <code>LEFT JOIN ON A.column = B.column</code>, we can do <code>LEFT JOIN ON A.column &lt;= B.column</code> for one row in table <code>A</code> to match to multiple rows in <code>B</code>. DuckDB has a <a href="https://duckdb.org/2022/05/27/iejoin.html">blog post</a> that outlines this join in detail, including fast implementation.</p>
+<h4 id="the-concept-of-list-columns">The concept of <code>LIST</code> columns</h4>
+<p>DuckDB has first class support for <code>LIST</code> columns - that is, each row in a <code>LIST</code> column can have a varying length (much like a Python <code>list</code>), but must have the exact same datatype (like R&rsquo;s <code>vector</code>). Using list columns allow us to eschew the use of an additional <code>GROUP BY</code> operation on top of a <code>WHERE</code> filter or <code>SELECT DISTINCT</code> operation, since we can directly perform those on the <code>LIST</code> column itself.</p>
+<h4 id="date-algebra">Date algebra</h4>
+<p>Dates can be rather difficult to handle well in most tools and languages, with several packages purpose built to make handling them easier - <a href="https://lubridate.tidyverse.org/">lubridate</a> from the <a href="https://www.tidyverse.org/">tidyverse</a> is a stellar example. Thankfully, DuckDB provides a similar swiss-knife set of tools to deal with it, including specifying <code>INTERVAL</code>s (a special data type that represent a period of time independent of specific time values) to modify <code>TIMESTAMP</code> values using addition or subtraction.</p>
+<h3 id="tell-me-the-query-please">Tell me the query, PLEASE!</h3>
+<p>Okay - had a lot of background. Let&rsquo;s have at it! The query by itself in SQL is (see immediately below for runnable code in Python):</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="k">SELECT</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="w">     </span><span class="n">A</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">departure_time</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">LIST_DISTINCT</span><span class="p">(</span><span class="n">LIST</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">ID</span><span class="p">))</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">docked_trucks</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">LIST_UNIQUE</span><span class="p">(</span><span class="n">LIST</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">ID</span><span class="p">))</span><span class="w">   </span><span class="k">AS</span><span class="w"> </span><span class="n">docked_truck_count</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="w"></span><span class="k">FROM</span><span class="w"> </span><span class="p">(</span><span class="w">
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w">
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="w">        </span><span class="p">,</span><span class="n">arrival_time</span><span class="w">   </span><span class="o">-</span><span class="w"> </span><span class="p">(</span><span class="nb">INTERVAL</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">MINUTE</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">window_open</span><span class="w">
+</span></span></span><span class="line"><span class="ln">12</span><span class="cl"><span class="w">        </span><span class="p">,</span><span class="n">departure_time</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="nb">INTERVAL</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">MINUTE</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">window_close</span><span class="w">
+</span></span></span><span class="line"><span class="ln">13</span><span class="cl"><span class="w">    </span><span class="k">FROM</span><span class="w"> </span><span class="k">data</span><span class="p">)</span><span class="w"> </span><span class="n">A</span><span class="w">
+</span></span></span><span class="line"><span class="ln">14</span><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="ln">15</span><span class="cl"><span class="w"></span><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="p">(</span><span class="w">
+</span></span></span><span class="line"><span class="ln">16</span><span class="cl"><span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w">
+</span></span></span><span class="line"><span class="ln">17</span><span class="cl"><span class="w">        </span><span class="p">,</span><span class="n">DATEDIFF</span><span class="p">(</span><span class="s1">&#39;seconds&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">arrival_time</span><span class="p">,</span><span class="w"> </span><span class="n">departure_time</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">duration</span><span class="w">
+</span></span></span><span class="line"><span class="ln">18</span><span class="cl"><span class="w">    </span><span class="k">FROM</span><span class="w"> </span><span class="k">data</span><span class="p">)</span><span class="w"> </span><span class="n">B</span><span class="w">
+</span></span></span><span class="line"><span class="ln">19</span><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="ln">20</span><span class="cl"><span class="w"></span><span class="k">ON</span><span class="w"> </span><span class="p">((</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w"> </span><span class="k">AND</span><span class="w"> 
+</span></span></span><span class="line"><span class="ln">21</span><span class="cl"><span class="w">    	</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">   </span><span class="o">+</span><span class="w"> </span><span class="n">TO_SECONDS</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">duration</span><span class="p">))</span><span class="w"> </span><span class="o">&gt;=</span><span class="w">  </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="p">)</span><span class="w"> </span><span class="k">OR</span><span class="w">
+</span></span></span><span class="line"><span class="ln">22</span><span class="cl"><span class="w">    </span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w"> </span><span class="k">AND</span><span class="w"> 
+</span></span></span><span class="line"><span class="ln">23</span><span class="cl"><span class="w">                                  </span><span class="n">B</span><span class="p">.</span><span class="n">departure_time</span><span class="w">  </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="p">)</span><span class="w"> </span><span class="k">OR</span><span class="w">
+</span></span></span><span class="line"><span class="ln">24</span><span class="cl"><span class="w">    </span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w"> </span><span class="k">AND</span><span class="w">
+</span></span></span><span class="line"><span class="ln">25</span><span class="cl"><span class="w">    	</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">departure_time</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">TO_SECONDS</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">duration</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="p">))</span><span class="w">
+</span></span></span><span class="line"><span class="ln">26</span><span class="cl"><span class="w"></span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span></span></span></code></pre></div><p>A small, succinct query such as this will need a bit of explanation to take it all in. Here&rsquo;s one below, reproducible in Python (make sure to install <code>duckdb</code> first!). Expand it to view.</p>
+<details markdown="1"><summary>SQL with explanation.</summary>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="kn">import</span> <span class="nn">duckdb</span> <span class="k">as</span> <span class="nn">db</span>
+</span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="n">db</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">&#34;&#34;&#34;
+</span></span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="s2">    SELECT
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="s2">        A.arrival_time
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="s2">        ,A.departure_time
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="s2">        ,A.window_open
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="s2">        ,A.window_close
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="s2">        -- LIST aggregates the values into a LIST column
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="s2">        -- and LIST_DISTINCT finds the unique values in it
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="s2">        ,LIST_DISTINCT(LIST(B.ID)) AS docked_trucks
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="s2">        -- finally, LIST_UNIQUE calculates the unique number of values in it
+</span></span></span><span class="line"><span class="ln">12</span><span class="cl"><span class="s2">        ,LIST_UNIQUE(LIST(B.ID))   AS docked_truck_count
+</span></span></span><span class="line"><span class="ln">13</span><span class="cl"><span class="s2">
+</span></span></span><span class="line"><span class="ln">14</span><span class="cl"><span class="s2">    FROM (
+</span></span></span><span class="line"><span class="ln">15</span><span class="cl"><span class="s2">        SELECT
+</span></span></span><span class="line"><span class="ln">16</span><span class="cl"><span class="s2">            *
+</span></span></span><span class="line"><span class="ln">17</span><span class="cl"><span class="s2">            ,arrival_time   - (INTERVAL 1 MINUTE) AS window_open
+</span></span></span><span class="line"><span class="ln">18</span><span class="cl"><span class="s2">            ,departure_time + (INTERVAL 1 MINUTE) AS window_close
+</span></span></span><span class="line"><span class="ln">19</span><span class="cl"><span class="s2">        FROM data -- remember we defined data as the Polars DataFrame with our truck station data
+</span></span></span><span class="line"><span class="ln">20</span><span class="cl"><span class="s2">    ) A
+</span></span></span><span class="line"><span class="ln">21</span><span class="cl"><span class="s2">
+</span></span></span><span class="line"><span class="ln">22</span><span class="cl"><span class="s2">    LEFT JOIN (
+</span></span></span><span class="line"><span class="ln">23</span><span class="cl"><span class="s2">        SELECT
+</span></span></span><span class="line"><span class="ln">24</span><span class="cl"><span class="s2">            *
+</span></span></span><span class="line"><span class="ln">25</span><span class="cl"><span class="s2">            -- This is the time, in seconds between the arrival and departure of
+</span></span></span><span class="line"><span class="ln">26</span><span class="cl"><span class="s2">            -- each truck PER ROW in the original data-frame 
+</span></span></span><span class="line"><span class="ln">27</span><span class="cl"><span class="s2">            ,DATEDIFF(&#39;seconds&#39;, arrival_time, departure_time) AS duration
+</span></span></span><span class="line"><span class="ln">28</span><span class="cl"><span class="s2">        FROM data -- this is where we perform a self-join
+</span></span></span><span class="line"><span class="ln">29</span><span class="cl"><span class="s2">    ) B
+</span></span></span><span class="line"><span class="ln">30</span><span class="cl"><span class="s2">
+</span></span></span><span class="line"><span class="ln">31</span><span class="cl"><span class="s2">    ON (
+</span></span></span><span class="line"><span class="ln">32</span><span class="cl"><span class="s2">        -- Case 2 in the diagram;
+</span></span></span><span class="line"><span class="ln">33</span><span class="cl"><span class="s2">        (B.arrival_time &lt;= A.window_open AND 
+</span></span></span><span class="line"><span class="ln">34</span><span class="cl"><span class="s2">            -- Adding the duration here makes sure that the second interval
+</span></span></span><span class="line"><span class="ln">35</span><span class="cl"><span class="s2">            -- is at least ENDING AFTER the start of the overlap window
+</span></span></span><span class="line"><span class="ln">36</span><span class="cl"><span class="s2">            (B.arrival_time   + TO_SECONDS(B.duration)) &gt;=  A.window_open) OR
+</span></span></span><span class="line"><span class="ln">37</span><span class="cl"><span class="s2">
+</span></span></span><span class="line"><span class="ln">38</span><span class="cl"><span class="s2">        -- Case 3 in the diagram - the simplest of all five cases
+</span></span></span><span class="line"><span class="ln">39</span><span class="cl"><span class="s2">        (B.arrival_time &gt;= A.window_open AND 
+</span></span></span><span class="line"><span class="ln">40</span><span class="cl"><span class="s2">                                      B.departure_time  &lt;= A.window_close) OR
+</span></span></span><span class="line"><span class="ln">41</span><span class="cl"><span class="s2">
+</span></span></span><span class="line"><span class="ln">42</span><span class="cl"><span class="s2">        -- Case 4 in the digram;
+</span></span></span><span class="line"><span class="ln">43</span><span class="cl"><span class="s2">        (B.arrival_time &gt;= A.window_open AND
+</span></span></span><span class="line"><span class="ln">44</span><span class="cl"><span class="s2">            -- Subtracting the duration here makes sure that the second interval
+</span></span></span><span class="line"><span class="ln">45</span><span class="cl"><span class="s2">            -- STARTS BEFORE the end of the overlap window.
+</span></span></span><span class="line"><span class="ln">46</span><span class="cl"><span class="s2">            (B.departure_time - TO_SECONDS(B.duration)) &lt;= A.window_close)
+</span></span></span><span class="line"><span class="ln">47</span><span class="cl"><span class="s2">    )
+</span></span></span><span class="line"><span class="ln">48</span><span class="cl"><span class="s2">    GROUP BY 1, 2, 3, 4
+</span></span></span><span class="line"><span class="ln">49</span><span class="cl"><span class="s2">&#34;&#34;&#34;</span><span class="p">)</span></span></span></code></pre></div></details>
+<p>The output of this query is:</p>
+
+
+
+
+
+<pre tabindex="0"><code>&#34;&#34;&#34;
+┌─────────────────────┬─────────────────────┬─────────────────────┬───┬──────────────────┬────────────────────┐
+│    arrival_time     │   departure_time    │     window_open     │ … │  docked_trucks   │ docked_truck_count │
+│      timestamp      │      timestamp      │      timestamp      │   │    varchar[]     │       uint64       │
+├─────────────────────┼─────────────────────┼─────────────────────┼───┼──────────────────┼────────────────────┤
+│ 2023-01-01 06:23:47 │ 2023-01-01 06:25:08 │ 2023-01-01 06:22:47 │ … │ [A1]             │                  1 │
+│ 2023-01-01 06:26:42 │ 2023-01-01 06:28:02 │ 2023-01-01 06:25:42 │ … │ [A1]             │                  1 │
+│ 2023-01-01 06:30:20 │ 2023-01-01 06:35:01 │ 2023-01-01 06:29:20 │ … │ [B3, C3, A6, A5] │                  4 │
+│ 2023-01-01 06:32:06 │ 2023-01-01 06:33:48 │ 2023-01-01 06:31:06 │ … │ [B3, C3, A6, A5] │                  4 │
+│ 2023-01-01 06:33:09 │ 2023-01-01 06:36:01 │ 2023-01-01 06:32:09 │ … │ [B3, C3, A6, A5] │                  4 │
+│ 2023-01-01 06:34:08 │ 2023-01-01 06:39:49 │ 2023-01-01 06:33:08 │ … │ [B3, C3, A6, A5] │                  4 │
+│ 2023-01-01 06:36:40 │ 2023-01-01 06:38:34 │ 2023-01-01 06:35:40 │ … │ [A5, A6, C3, B3] │                  4 │
+│ 2023-01-01 06:37:43 │ 2023-01-01 06:40:48 │ 2023-01-01 06:36:43 │ … │ [A5, A6, C3]     │                  3 │
+│ 2023-01-01 06:39:48 │ 2023-01-01 06:46:10 │ 2023-01-01 06:38:48 │ … │ [A6, A5, C3]     │                  3 │
+├─────────────────────┴─────────────────────┴─────────────────────┴───┴──────────────────┴────────────────────┤
+│ 9 rows                                                                                  6 columns (5 shown) │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+&#34;&#34;&#34;</code></pre><p>We clearly see the strengths of DuckDB in how succintly we were able to express this operation. We also find how DuckDB is able to seamlessly integrate with an existing Pandas or Polars pipeline with zero-conversion costs. In fact, we can convert this back to a Polars or Pandas dataframe by appending the ending bracket with <code>db.query(...).pl()</code> and <code>db.query(...).pd()</code> respectively.</p>
+<h2 id="can-we-make-the-sql-simpler">Can we make the SQL simpler?</h2>
+<p>Now that we&rsquo;ve understood the logic that goes into the query, let&rsquo;s try to optimize the algorithm. We have the three conditions:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="ln">1</span><span class="cl"><span class="c1">-- Case 2 in the diagram
+</span></span></span><span class="line"><span class="ln">2</span><span class="cl"><span class="c1"></span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w"> </span><span class="k">AND</span><span class="w"> 
+</span></span></span><span class="line"><span class="ln">3</span><span class="cl"><span class="w">    </span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">   </span><span class="o">+</span><span class="w"> </span><span class="n">TO_SECONDS</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">duration</span><span class="p">))</span><span class="w"> </span><span class="o">&gt;=</span><span class="w">  </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="p">)</span><span class="w"> </span><span class="k">OR</span><span class="w">
+</span></span></span><span class="line"><span class="ln">4</span><span class="cl"><span class="w"></span><span class="c1">-- Case 3 in the diagram
+</span></span></span><span class="line"><span class="ln">5</span><span class="cl"><span class="c1"></span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w"> </span><span class="k">AND</span><span class="w"> 
+</span></span></span><span class="line"><span class="ln">6</span><span class="cl"><span class="w">                              </span><span class="n">B</span><span class="p">.</span><span class="n">departure_time</span><span class="w">  </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="p">)</span><span class="w"> </span><span class="k">OR</span><span class="w">
+</span></span></span><span class="line"><span class="ln">7</span><span class="cl"><span class="w"></span><span class="c1">-- Case 4 in the diagram
+</span></span></span><span class="line"><span class="ln">8</span><span class="cl"><span class="c1"></span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w"> </span><span class="k">AND</span><span class="w">
+</span></span></span><span class="line"><span class="ln">9</span><span class="cl"><span class="w">    </span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">departure_time</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">TO_SECONDS</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">duration</span><span class="p">))</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="p">)</span></span></span></code></pre></div><p>What is common between these three conditions? It takes a while to see it; but it becomes clear that all these cases require the start of the overlap to be <em>before</em> the window ends, and the end of the overlap to be <em>after</em> the window starts. This can be simplified to just:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="ln">1</span><span class="cl"><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">   </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="w"> </span><span class="k">AND</span><span class="w">
+</span></span></span><span class="line"><span class="ln">2</span><span class="cl"><span class="w"></span><span class="n">B</span><span class="p">.</span><span class="n">departure_time</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span></span></span></code></pre></div><p>making our query much simpler!</p>
+<h3 id="simplified-sql-part-1">Simplified SQL: Part 1</h3>
+<p>We&rsquo;ve removed the need for the <code>duration</code> calculation algother now. Therefore, we can write:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="k">SELECT</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="w">     </span><span class="n">A</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">departure_time</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">LIST_DISTINCT</span><span class="p">(</span><span class="n">LIST</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">ID</span><span class="p">))</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">docked_trucks</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">LIST_UNIQUE</span><span class="p">(</span><span class="n">LIST</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">ID</span><span class="p">))</span><span class="w">   </span><span class="k">AS</span><span class="w"> </span><span class="n">docked_truck_count</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="w"></span><span class="k">FROM</span><span class="w"> </span><span class="p">(</span><span class="w">
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w">
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="w">        </span><span class="p">,</span><span class="n">arrival_time</span><span class="w">   </span><span class="o">-</span><span class="w"> </span><span class="p">(</span><span class="nb">INTERVAL</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">MINUTE</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">window_open</span><span class="w">
+</span></span></span><span class="line"><span class="ln">12</span><span class="cl"><span class="w">        </span><span class="p">,</span><span class="n">departure_time</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="nb">INTERVAL</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">MINUTE</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">window_close</span><span class="w">
+</span></span></span><span class="line"><span class="ln">13</span><span class="cl"><span class="w">    </span><span class="k">FROM</span><span class="w"> </span><span class="k">data</span><span class="p">)</span><span class="w"> </span><span class="n">A</span><span class="w">
+</span></span></span><span class="line"><span class="ln">14</span><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="ln">15</span><span class="cl"><span class="w"></span><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="k">data</span><span class="w"> </span><span class="n">B</span><span class="w">
+</span></span></span><span class="line"><span class="ln">16</span><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="ln">17</span><span class="cl"><span class="w"></span><span class="k">ON</span><span class="w"> </span><span class="p">(</span><span class="w">
+</span></span></span><span class="line"><span class="ln">18</span><span class="cl"><span class="w">    </span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">   </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_close</span><span class="w"> </span><span class="k">AND</span><span class="w">
+</span></span></span><span class="line"><span class="ln">19</span><span class="cl"><span class="w">    </span><span class="n">B</span><span class="p">.</span><span class="n">departure_time</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">A</span><span class="p">.</span><span class="n">window_open</span><span class="w">
+</span></span></span><span class="line"><span class="ln">20</span><span class="cl"><span class="w"></span><span class="p">)</span><span class="w">
+</span></span></span><span class="line"><span class="ln">21</span><span class="cl"><span class="w"></span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span></span></span></code></pre></div><p>Can we simplify this even further?</p>
+<h3 id="simplification-part-2">Simplification: Part 2</h3>
+<p>I think the SQL query in the above section is very easy to ready already. However, it is a little clunky overall, and there is a way that we can leverage DuckDB&rsquo;s extensive optimizations to simplify our <strong>legibility</strong> by rewriting the query as a cross join:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="k">SELECT</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="w">    </span><span class="n">A</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">departure_time</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">arrival_time</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="p">(</span><span class="nb">INTERVAL</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">MINUTE</span><span class="p">)</span><span class="w">   </span><span class="k">AS</span><span class="w"> </span><span class="n">window_open</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">A</span><span class="p">.</span><span class="n">departure_time</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="nb">INTERVAL</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">MINUTE</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">window_close</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">LIST_DISTINCT</span><span class="p">(</span><span class="n">LIST</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">ID</span><span class="p">))</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">docked_trucks</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="w">    </span><span class="p">,</span><span class="n">LIST_UNIQUE</span><span class="p">(</span><span class="n">LIST</span><span class="p">(</span><span class="n">B</span><span class="p">.</span><span class="n">ID</span><span class="p">))</span><span class="w">   </span><span class="k">AS</span><span class="w"> </span><span class="n">docked_truck_count</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="w"></span><span class="k">FROM</span><span class="w">  </span><span class="k">data</span><span class="w"> </span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="k">data</span><span class="w"> </span><span class="n">B</span><span class="w">
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="w"></span><span class="k">WHERE</span><span class="w"> </span><span class="n">B</span><span class="p">.</span><span class="n">arrival_time</span><span class="w">   </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">window_close</span><span class="w">
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="w"></span><span class="k">AND</span><span class="w">   </span><span class="n">B</span><span class="p">.</span><span class="n">departure_time</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">window_open</span><span class="w">
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="w"></span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span></span></span></code></pre></div><p>Why does this work? Before optimization on DuckDB, this is what the query plan looks like:</p>
+<details markdown="1"><summary>DuckDB query plan before optimization</summary>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="s2">&#34;&#34;&#34;
+</span></span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="s2">┌───────────────────────────┐                             
+</span></span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="s2">│         PROJECTION        │                             
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="s2">│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="s2">│             0             │                             
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="s2">│             1             │                             
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="s2">│             2             │                             
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="s2">│             3             │                             
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="s2">│       docked_trucks       │                             
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="s2">│     docked_truck_count    │                             
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="s2">└─────────────┬─────────────┘                                                          
+</span></span></span><span class="line"><span class="ln">12</span><span class="cl"><span class="s2">┌─────────────┴─────────────┐                             
+</span></span></span><span class="line"><span class="ln">13</span><span class="cl"><span class="s2">│         AGGREGATE         │                             
+</span></span></span><span class="line"><span class="ln">14</span><span class="cl"><span class="s2">│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+</span></span></span><span class="line"><span class="ln">15</span><span class="cl"><span class="s2">│        arrival_time       │                             
+</span></span></span><span class="line"><span class="ln">16</span><span class="cl"><span class="s2">│       departure_time      │                             
+</span></span></span><span class="line"><span class="ln">17</span><span class="cl"><span class="s2">│        window_open        │                             
+</span></span></span><span class="line"><span class="ln">18</span><span class="cl"><span class="s2">│        window_close       │                             
+</span></span></span><span class="line"><span class="ln">19</span><span class="cl"><span class="s2">│          list(ID)         │                             
+</span></span></span><span class="line"><span class="ln">20</span><span class="cl"><span class="s2">└─────────────┬─────────────┘                                                          
+</span></span></span><span class="line"><span class="ln">21</span><span class="cl"><span class="s2">┌─────────────┴─────────────┐                             
+</span></span></span><span class="line"><span class="ln">22</span><span class="cl"><span class="s2">│           FILTER          │                             
+</span></span></span><span class="line"><span class="ln">23</span><span class="cl"><span class="s2">│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+</span></span></span><span class="line"><span class="ln">24</span><span class="cl"><span class="s2">│     (arrival_time &lt;=      │                             
+</span></span></span><span class="line"><span class="ln">25</span><span class="cl"><span class="s2">│(departure_time + to_m...  │                             
+</span></span></span><span class="line"><span class="ln">26</span><span class="cl"><span class="s2">│        AS BIGINT))))      │                             
+</span></span></span><span class="line"><span class="ln">27</span><span class="cl"><span class="s2">│    (departure_time &gt;=     │                             
+</span></span></span><span class="line"><span class="ln">28</span><span class="cl"><span class="s2">│(arrival_time - to_min...  │                             
+</span></span></span><span class="line"><span class="ln">29</span><span class="cl"><span class="s2">│        AS BIGINT))))      │                             
+</span></span></span><span class="line"><span class="ln">30</span><span class="cl"><span class="s2">└─────────────┬─────────────┘                                                          
+</span></span></span><span class="line"><span class="ln">31</span><span class="cl"><span class="s2">┌─────────────┴─────────────┐                             
+</span></span></span><span class="line"><span class="ln">32</span><span class="cl"><span class="s2">│       CROSS_PRODUCT       ├──────────────┐              
+</span></span></span><span class="line"><span class="ln">33</span><span class="cl"><span class="s2">└─────────────┬─────────────┘              │                                           
+</span></span></span><span class="line"><span class="ln">34</span><span class="cl"><span class="s2">┌─────────────┴─────────────┐┌─────────────┴─────────────┐
+</span></span></span><span class="line"><span class="ln">35</span><span class="cl"><span class="s2">│         ARROW_SCAN        ││         ARROW_SCAN        │
+</span></span></span><span class="line"><span class="ln">36</span><span class="cl"><span class="s2">└───────────────────────────┘└───────────────────────────┘ 
+</span></span></span><span class="line"><span class="ln">37</span><span class="cl"><span class="s2">&#34;&#34;&#34;</span>                            </span></span></code></pre></div></details>
+<p>After optimization, the <code>CROSS_PRODUCT</code> is <strong>automatically</strong> optimized to an <strong>interval join</strong>!</p>
+<details markdown="1"><summary>DuckDB query after before optimization</summary>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="s2">&#34;&#34;&#34;
+</span></span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="s2">┌───────────────────────────┐                             
+</span></span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="s2">│         PROJECTION        │                             
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="s2">│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="s2">│             0             │                             
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="s2">│             1             │                             
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="s2">│             2             │                             
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="s2">│             3             │                             
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="s2">│       docked_trucks       │                             
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="s2">│     docked_truck_count    │                             
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="s2">└─────────────┬─────────────┘                                                          
+</span></span></span><span class="line"><span class="ln">12</span><span class="cl"><span class="s2">┌─────────────┴─────────────┐                             
+</span></span></span><span class="line"><span class="ln">13</span><span class="cl"><span class="s2">│         AGGREGATE         │                             
+</span></span></span><span class="line"><span class="ln">14</span><span class="cl"><span class="s2">│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+</span></span></span><span class="line"><span class="ln">15</span><span class="cl"><span class="s2">│        arrival_time       │                             
+</span></span></span><span class="line"><span class="ln">16</span><span class="cl"><span class="s2">│       departure_time      │                             
+</span></span></span><span class="line"><span class="ln">17</span><span class="cl"><span class="s2">│        window_open        │                             
+</span></span></span><span class="line"><span class="ln">18</span><span class="cl"><span class="s2">│        window_close       │                             
+</span></span></span><span class="line"><span class="ln">19</span><span class="cl"><span class="s2">│          list(ID)         │                             
+</span></span></span><span class="line"><span class="ln">20</span><span class="cl"><span class="s2">└─────────────┬─────────────┘                                                          
+</span></span></span><span class="line"><span class="ln">21</span><span class="cl"><span class="s2">┌─────────────┴─────────────┐                             
+</span></span></span><span class="line"><span class="ln">22</span><span class="cl"><span class="s2">│      COMPARISON_JOIN      │                             
+</span></span></span><span class="line"><span class="ln">23</span><span class="cl"><span class="s2">│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+</span></span></span><span class="line"><span class="ln">24</span><span class="cl"><span class="s2">│           INNER           │                             
+</span></span></span><span class="line"><span class="ln">25</span><span class="cl"><span class="s2">│ ((departure_time + &#39;00:01 │                             
+</span></span></span><span class="line"><span class="ln">26</span><span class="cl"><span class="s2">│     :00&#39;::INTERVAL) &gt;=    ├──────────────┐              
+</span></span></span><span class="line"><span class="ln">27</span><span class="cl"><span class="s2">│        arrival_time)      │              │              
+</span></span></span><span class="line"><span class="ln">28</span><span class="cl"><span class="s2">│((arrival_time - &#39;00:01:00&#39;│              │              
+</span></span></span><span class="line"><span class="ln">29</span><span class="cl"><span class="s2">│       ::INTERVAL) &lt;=      │              │              
+</span></span></span><span class="line"><span class="ln">30</span><span class="cl"><span class="s2">│       departure_time)     │              │              
+</span></span></span><span class="line"><span class="ln">31</span><span class="cl"><span class="s2">└─────────────┬─────────────┘              │                                           
+</span></span></span><span class="line"><span class="ln">32</span><span class="cl"><span class="s2">┌─────────────┴─────────────┐┌─────────────┴─────────────┐
+</span></span></span><span class="line"><span class="ln">33</span><span class="cl"><span class="s2">│         ARROW_SCAN        ││         ARROW_SCAN        │
+</span></span></span><span class="line"><span class="ln">34</span><span class="cl"><span class="s2">└───────────────────────────┘└───────────────────────────┘
+</span></span></span><span class="line"><span class="ln">35</span><span class="cl"><span class="s2">&#34;&#34;&#34;</span>                      </span></span></code></pre></div></details>
+<p>So in effect, we&rsquo;re actually exploiting a feature of DuckDB to allow us to write our queries in a suboptimal manner for greater readability, and allowing the optmizer to do a good chunk of our work for us. I wouldn&rsquo;t recommend using this generally, because not all SQL engine optmizers will be able to find an efficient route to these calculations for large datasets.</p>
+<h3 id="how-to-get-query-plans">How to get query plans?</h3>
+<p>I&rsquo;m glad you asked. Here&rsquo;s the DuckDB <a href="https://duckdb.org/docs/guides/meta/explain.html">page explaining <code>EXPLAIN</code></a> (heh). Here&rsquo;s the code I used:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="kn">import</span> <span class="nn">duckdb</span> <span class="k">as</span> <span class="nn">db</span>
+</span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="n">db</span><span class="o">.</span><span class="n">sql</span><span class="p">(</span><span class="s2">&#34;SET EXPLAIN_OUTPUT=&#39;all&#39;;&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="nb">print</span><span class="p">(</span><span class="n">db</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">&#34;&#34;&#34;
+</span></span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="s2">EXPLAIN
+</span></span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="s2">SELECT
+</span></span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="s2">    A.arrival_time
+</span></span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="s2">    ,A.departure_time
+</span></span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="s2">    ,A.arrival_time - (INTERVAL 1 MINUTE) AS window_open
+</span></span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="s2">    ,A.departure_time + (INTERVAL 1 MINUTE) AS window_close
+</span></span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="s2">    ,LIST_DISTINCT(LIST(B.ID)) AS docked_trucks
+</span></span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="s2">    ,LIST_UNIQUE(LIST(B.ID))   AS docked_truck_count
+</span></span></span><span class="line"><span class="ln">12</span><span class="cl"><span class="s2">FROM  data A, data B
+</span></span></span><span class="line"><span class="ln">13</span><span class="cl"><span class="s2">WHERE B.arrival_time   &lt;= window_close
+</span></span></span><span class="line"><span class="ln">14</span><span class="cl"><span class="s2">AND   B.departure_time &gt;= window_open
+</span></span></span><span class="line"><span class="ln">15</span><span class="cl"><span class="s2">GROUP BY 1, 2, 3, 4
+</span></span></span><span class="line"><span class="ln">16</span><span class="cl"><span class="s2">&#34;&#34;&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">pl</span><span class="p">()[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span></span></span></code></pre></div><h1 id="what-are-the-alternatives">What are the alternatives?</h1>
+<h2 id="the-datatable-way">The <code>data.table</code> way</h2>
+<p><a href="https://github.com/Rdatatable/data.table"><code>data.table</code></a> is a package that has historically been ahead of its time - in both speed and features that it has had. Developement has taken a hit recently, but will likely <a href="https://github.com/Rdatatable/data.table/issues/5656">pick back up</a>. It&rsquo;s my favourite package on all fronts for data manipulation, but suffers simply from the lack of broader R support across the ML and DL space.</p>
+<h3 id="the-foverlaps-function">The <code>foverlaps</code> function</h3>
+<p>If this kind of overlapping join is common, shouldn&rsquo;t someone have developed a package for it? Turns out, <code>data.table</code> has, and with very specific constraints that make it the perfect solution to our problem (if you don&rsquo;t mind switching over to R, that is).</p>
+<p>The <code>foverlaps</code> function has these requirements:</p>
+<ol>
+<li>The input <code>data.table</code> objects have to be keyed for automatic recognition of columns.</li>
+<li>The default match type is that it matches all three cases from the image above. Side note: it also has matches for <code>within</code> overlap, matching <code>start</code> and <code>end</code> windows,</li>
+<li>The last two matching columns in the join condition in <code>by</code> must specify the <code>start</code> and <code>end</code> points of the overlapping window. This isn&rsquo;t a problem for us now, but does restrict for future uses where we may want non-equi joins on other cases.</li>
+</ol>
+<h3 id="the-code-_si_-the-code">The code, <em>si</em>, the code!</h3>
+<p>Without further ado:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-r" data-lang="r"><span class="line"><span class="ln"> 1</span><span class="cl"><span class="nf">library</span><span class="p">(</span><span class="n">data.table</span><span class="p">)</span>
+</span></span><span class="line"><span class="ln"> 2</span><span class="cl"><span class="nf">library</span><span class="p">(</span><span class="n">lubridate</span><span class="p">)</span>
+</span></span><span class="line"><span class="ln"> 3</span><span class="cl">
+</span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="c1">######### BOILERPLATE CODE, NO LOGIC HERE ####################</span>
+</span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="n">arrival_time</span> <span class="o">=</span> <span class="nf">as_datetime</span><span class="p">(</span><span class="nf">c</span><span class="p">(</span>
+</span></span><span class="line"><span class="ln"> 6</span><span class="cl">  <span class="s">&#39;2023-01-01 06:23:47.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:26:42.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln"> 7</span><span class="cl">  <span class="s">&#39;2023-01-01 06:30:20.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:32:06.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln"> 8</span><span class="cl">  <span class="s">&#39;2023-01-01 06:33:09.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:34:08.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln"> 9</span><span class="cl">  <span class="s">&#39;2023-01-01 06:36:40.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:37:43.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln">10</span><span class="cl">  <span class="s">&#39;2023-01-01 06:39:48.000000&#39;</span><span class="p">))</span>
+</span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="n">departure_time</span> <span class="o">=</span> <span class="nf">as_datetime</span><span class="p">(</span><span class="nf">c</span><span class="p">(</span>
+</span></span><span class="line"><span class="ln">12</span><span class="cl">  <span class="s">&#39;2023-01-01 06:25:08.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:28:02.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln">13</span><span class="cl">  <span class="s">&#39;2023-01-01 06:35:01.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:33:48.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln">14</span><span class="cl">  <span class="s">&#39;2023-01-01 06:36:01.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:39:49.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln">15</span><span class="cl">  <span class="s">&#39;2023-01-01 06:38:34.000000&#39;</span><span class="p">,</span> <span class="s">&#39;2023-01-01 06:40:48.000000&#39;</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln">16</span><span class="cl">  <span class="s">&#39;2023-01-01 06:46:10.000000&#39;</span><span class="p">))</span>
+</span></span><span class="line"><span class="ln">17</span><span class="cl"><span class="n">ID</span> <span class="o">=</span> <span class="nf">c</span><span class="p">(</span><span class="s">&#39;A1&#39;</span><span class="p">,</span> <span class="s">&#39;A1&#39;</span><span class="p">,</span> <span class="s">&#39;A5&#39;</span><span class="p">,</span> <span class="s">&#39;A6&#39;</span><span class="p">,</span> <span class="s">&#39;B3&#39;</span><span class="p">,</span> <span class="s">&#39;C3&#39;</span><span class="p">,</span> <span class="s">&#39;A6&#39;</span><span class="p">,</span> <span class="s">&#39;A5&#39;</span><span class="p">,</span> <span class="s">&#39;A6&#39;</span><span class="p">)</span>
+</span></span><span class="line"><span class="ln">18</span><span class="cl">
+</span></span><span class="line"><span class="ln">19</span><span class="cl"><span class="n">DT</span> <span class="o">=</span> <span class="nf">data.table</span><span class="p">(</span>
+</span></span><span class="line"><span class="ln">20</span><span class="cl">  <span class="n">arrival_time</span> <span class="o">=</span> <span class="n">arrival_time</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln">21</span><span class="cl">  <span class="n">departure_time</span> <span class="o">=</span> <span class="n">departure_time</span><span class="p">,</span>
+</span></span><span class="line"><span class="ln">22</span><span class="cl">  <span class="n">ID</span> <span class="o">=</span> <span class="n">ID</span><span class="p">)</span>
+</span></span><span class="line"><span class="ln">23</span><span class="cl"><span class="c1">######### BOILERPLATE CODE, NO LOGIC HERE ####################</span>
+</span></span><span class="line"><span class="ln">24</span><span class="cl">
+</span></span><span class="line"><span class="ln">25</span><span class="cl"><span class="c1"># A copy(DT) creates a copy of a data.table that isn&#39;t linked</span>
+</span></span><span class="line"><span class="ln">26</span><span class="cl"><span class="c1"># to the original one, so that changes in it don&#39;t reflect in</span>
+</span></span><span class="line"><span class="ln">27</span><span class="cl"><span class="c1"># the original DT object.</span>
+</span></span><span class="line"><span class="ln">28</span><span class="cl"><span class="c1"># The `:=` allow assignment by reference (i.e. &#34;in place&#34;).</span>
+</span></span><span class="line"><span class="ln">29</span><span class="cl"><span class="n">DT_with_windows</span> <span class="o">=</span> <span class="nf">copy</span><span class="p">(</span><span class="n">DT</span><span class="p">)</span><span class="n">[</span><span class="p">,</span> <span class="nf">`:=`</span><span class="p">(</span>
+</span></span><span class="line"><span class="ln">30</span><span class="cl">  <span class="n">window_start</span>   <span class="o">=</span> <span class="n">arrival_time</span>   <span class="o">-</span> <span class="nf">minutes</span><span class="p">(</span><span class="m">1</span><span class="p">),</span>
+</span></span><span class="line"><span class="ln">31</span><span class="cl">  <span class="n">window_end</span> <span class="o">=</span> <span class="n">departure_time</span> <span class="o">+</span> <span class="nf">minutes</span><span class="p">(</span><span class="m">1</span><span class="p">))</span><span class="n">]</span>
+</span></span><span class="line"><span class="ln">32</span><span class="cl">
+</span></span><span class="line"><span class="ln">33</span><span class="cl"><span class="c1"># This step is necessary for the second table, but not the first, but we</span>
+</span></span><span class="line"><span class="ln">34</span><span class="cl"><span class="c1"># key both data.tables to make the foverlap code very succinct.</span>
+</span></span><span class="line"><span class="ln">35</span><span class="cl"><span class="nf">setkeyv</span><span class="p">(</span><span class="n">DT</span><span class="p">,</span> <span class="nf">c</span><span class="p">(</span><span class="s">&#34;arrival_time&#34;</span><span class="p">,</span> <span class="s">&#34;departure_time&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="ln">36</span><span class="cl"><span class="nf">setkeyv</span><span class="p">(</span><span class="n">DT_with_windows</span><span class="p">,</span> <span class="nf">c</span><span class="p">(</span><span class="s">&#34;window_start&#34;</span><span class="p">,</span> <span class="s">&#34;window_end&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="ln">37</span><span class="cl">
+</span></span><span class="line"><span class="ln">38</span><span class="cl"><span class="c1"># The foverlap function returns a data.table, so we can simply apply</span>
+</span></span><span class="line"><span class="ln">39</span><span class="cl"><span class="c1"># the usual data.table syntax on it!</span>
+</span></span><span class="line"><span class="ln">40</span><span class="cl"><span class="c1"># Since we have the same name of some columns in both data.tables,</span>
+</span></span><span class="line"><span class="ln">41</span><span class="cl"><span class="c1"># the latter table&#39;s columns are prefixed with &#34;i.&#34; to avoid conflicts.</span>
+</span></span><span class="line"><span class="ln">42</span><span class="cl"><span class="nf">foverlaps</span><span class="p">(</span><span class="n">DT</span><span class="p">,</span> <span class="n">DT_with_windows</span><span class="p">)</span><span class="n">[</span>
+</span></span><span class="line"><span class="ln">43</span><span class="cl">  <span class="p">,</span> <span class="n">.(docked_trucks</span> <span class="o">=</span> <span class="nf">list</span><span class="p">(</span><span class="nf">unique</span><span class="p">(</span><span class="n">i.ID</span><span class="p">)),</span>
+</span></span><span class="line"><span class="ln">44</span><span class="cl">      <span class="n">docked_truck_count</span> <span class="o">=</span> <span class="nf">uniqueN</span><span class="p">(</span><span class="n">i.ID</span><span class="p">))</span>
+</span></span><span class="line"><span class="ln">45</span><span class="cl">  <span class="p">,</span> <span class="n">.(arrival_time</span><span class="p">,</span> <span class="n">departure_time</span><span class="p">)</span><span class="n">]</span></span></span></code></pre></div><p>provides us the output:</p>
+
+
+
+
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-r" data-lang="r"><span class="line"><span class="ln"> 1</span><span class="cl">          <span class="n">arrival_time</span>      <span class="n">departure_time</span> <span class="n">docked_trucks</span> <span class="n">docked_truck_count</span>
+</span></span><span class="line"><span class="ln"> 2</span><span class="cl">                <span class="o">&lt;</span><span class="n">POSc</span><span class="o">&gt;</span>              <span class="o">&lt;</span><span class="n">POSc</span><span class="o">&gt;</span>        <span class="o">&lt;</span><span class="n">list</span><span class="o">&gt;</span>              <span class="o">&lt;</span><span class="n">int</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="ln"> 3</span><span class="cl"><span class="m">1</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">23</span><span class="o">:</span><span class="m">47</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">25</span><span class="o">:</span><span class="m">08</span>            <span class="n">A1</span>                  <span class="m">1</span>
+</span></span><span class="line"><span class="ln"> 4</span><span class="cl"><span class="m">2</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">26</span><span class="o">:</span><span class="m">42</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">28</span><span class="o">:</span><span class="m">02</span>            <span class="n">A1</span>                  <span class="m">1</span>
+</span></span><span class="line"><span class="ln"> 5</span><span class="cl"><span class="m">3</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">30</span><span class="o">:</span><span class="m">20</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">35</span><span class="o">:</span><span class="m">01</span>   <span class="n">A5</span><span class="p">,</span><span class="n">A6</span><span class="p">,</span><span class="n">B3</span><span class="p">,</span><span class="n">C3</span>                  <span class="m">4</span>
+</span></span><span class="line"><span class="ln"> 6</span><span class="cl"><span class="m">4</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">32</span><span class="o">:</span><span class="m">06</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">33</span><span class="o">:</span><span class="m">48</span>   <span class="n">A5</span><span class="p">,</span><span class="n">A6</span><span class="p">,</span><span class="n">B3</span><span class="p">,</span><span class="n">C3</span>                  <span class="m">4</span>
+</span></span><span class="line"><span class="ln"> 7</span><span class="cl"><span class="m">5</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">33</span><span class="o">:</span><span class="m">09</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">36</span><span class="o">:</span><span class="m">01</span>   <span class="n">A5</span><span class="p">,</span><span class="n">A6</span><span class="p">,</span><span class="n">B3</span><span class="p">,</span><span class="n">C3</span>                  <span class="m">4</span>
+</span></span><span class="line"><span class="ln"> 8</span><span class="cl"><span class="m">6</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">34</span><span class="o">:</span><span class="m">08</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">39</span><span class="o">:</span><span class="m">49</span>   <span class="n">A5</span><span class="p">,</span><span class="n">A6</span><span class="p">,</span><span class="n">B3</span><span class="p">,</span><span class="n">C3</span>                  <span class="m">4</span>
+</span></span><span class="line"><span class="ln"> 9</span><span class="cl"><span class="m">7</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">36</span><span class="o">:</span><span class="m">40</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">38</span><span class="o">:</span><span class="m">34</span>   <span class="n">B3</span><span class="p">,</span><span class="n">C3</span><span class="p">,</span><span class="n">A6</span><span class="p">,</span><span class="n">A5</span>                  <span class="m">4</span>
+</span></span><span class="line"><span class="ln">10</span><span class="cl"><span class="m">8</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">37</span><span class="o">:</span><span class="m">43</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">40</span><span class="o">:</span><span class="m">48</span>      <span class="n">C3</span><span class="p">,</span><span class="n">A6</span><span class="p">,</span><span class="n">A5</span>                  <span class="m">3</span>
+</span></span><span class="line"><span class="ln">11</span><span class="cl"><span class="m">9</span><span class="o">:</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">39</span><span class="o">:</span><span class="m">48</span> <span class="m">2023-01-01</span> <span class="m">06</span><span class="o">:</span><span class="m">46</span><span class="o">:</span><span class="m">10</span>      <span class="n">C3</span><span class="p">,</span><span class="n">A5</span><span class="p">,</span><span class="n">A6</span>                  <span class="m">3</span></span></span></code></pre></div><h3 id="considerations-for-using-datatable">Considerations for using <code>data.table</code></h3>
+<p>The package offers a wonderful, nearly one-stop solution that doesn&rsquo;t require you to write the logic out for the query or command yourself, but has a major problem for a lot of users - it requires you to switch your codebase to R, and a lot of your tasks may be on Python or in an SQL pipeline. So, what do you do?</p>
+<p>Consider the effort in maintaining an additional dependency for your analytics pipeline (i.e. R), and the effort that you&rsquo;ll need to invest to run R from Python, or run an R script in your pipeline and pull the output from it back into the pipeline, and make your call.</p>
+
+</content>
+<p>
+  
+</p>
+
+
+  <p>
+    <a href='mailto:nah@example.com?subject=Reply%20to%20"Overlap%20Joins%3a%20Number%20of%20docker%20trucks%20in%20an%20interval"'>
+      Reply to this post by email ↪
+    </a>
+  </p>
+
+
+
+  </main>
+  <footer><small>
+  © Avinash Mallya | Design via <a href="https://github.com/clente/hugo-bearcub">Bear Cub</a>.
+</small></footer>
+
+    
+</body>
+
+</html>
